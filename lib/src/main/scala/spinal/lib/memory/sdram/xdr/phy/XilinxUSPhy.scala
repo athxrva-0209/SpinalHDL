@@ -3,6 +3,7 @@ package spinal.lib.memory.sdram.xdr.phy
 import spinal.core._
 import spinal.lib._
 import spinal.lib.blackbox.xilinx.ultrascale.{IDELAYCTRL, IDELAYE3, IOBUFDS, ISERDESE3, MMCME3_ADV, OBUFDS, ODELAYE3, OSERDESE3}
+import spinal.lib.blackbox.xilinx.s7.{IOBUF}
 import spinal.lib.bus.misc.BusSlaveFactory
 import spinal.lib.memory.sdram.SdramLayout
 import spinal.lib.memory.sdram.xdr.{PhyLayout, SdramXdrIo, SdramXdrPhyCtrl}
@@ -121,7 +122,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     B"00" -> B"0000",
     B"10" -> B"0011",
     B"11" -> B"1111",
-    B"01" -> B"1111"
+    B"01" -> B"1100"
   ).asBools.reverse)))
   dqstReg.foreach(_.init(False))
 
@@ -147,7 +148,7 @@ case class XilinxUSPhy(sl : SdramLayout,
 
   // --- DQ Write Path ---
   val dq = for (i <- 0 until sl.dataWidth) yield new Area {
-    val buf = IOBUFDS()
+    val buf = IOBUF()
     io.sdram.DQ(i) := buf.IO
 
     val (serQ, serT) = seqToOutput("DQ", dqReg.map(_.map(_(i))).flatten, List.fill(4)(dqe0Reg))
