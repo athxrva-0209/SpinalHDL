@@ -17,6 +17,14 @@ case class OBUFDS() extends BlackBox {
   setBlackBoxName("OBUFDS")
 }
 
+case class IOBUF() extends BlackBox {
+  val I   = in Bool()
+  val T   = in Bool()
+  val O   = out Bool()
+  val IO  = inout(Analog(Bool()))
+  setBlackBoxName("IOBUF")
+}
+
 case class IOBUFDS() extends BlackBox {
     val I   = in Bool()
     val T   = in Bool()
