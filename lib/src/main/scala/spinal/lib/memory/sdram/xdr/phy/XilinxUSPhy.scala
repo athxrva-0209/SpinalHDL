@@ -12,6 +12,7 @@ import scala.collection.Seq
 import spinal.core.sim._
 import spinal.lib.memory.sdram.SdramGeneration.DDR3
 import spinal.lib.memory.sdram._
+import scala.util.control.Breaks.{break, breakable}
 
 
 
@@ -253,8 +254,8 @@ object XilinxUSPhyTest extends App {
         val counter = Reg(UInt(8 bits)) init(0)
         counter := counter + 1
 
-        phy.io.ctrl.phases(0).DQw := B(counter)
-        phy.io.ctrl.phases(1).DQw := B(counter + 1)
+        phy.io.ctrl.phases(0).DQw := Vec(B(counter), B(counter))
+        phy.io.ctrl.phases(1).DQw := Vec(B(counter + 1), B(counter + 1))
 
 
         phy.io.ctrl.writeEnable := True
@@ -341,8 +342,8 @@ object XilinxUSPhyWritePathCheck extends App {
           p.WEn := True
           p.DM.foreach(_ := B(0))
         }
-        phy.io.ctrl.phases(0).DQw := B"8'hA5"
-        phy.io.ctrl.phases(1).DQw := B"8'h3C"
+        phy.io.ctrl.phases(0).DQw := Vec(B"8'hA5", B"8'hA5")
+        phy.io.ctrl.phases(1).DQw := Vec(B"8'h3C", B"8'h3C")
         phy.io.ctrl.ADDR := 0
         phy.io.ctrl.BA := 0
         phy.io.ctrl.readEnable := False
