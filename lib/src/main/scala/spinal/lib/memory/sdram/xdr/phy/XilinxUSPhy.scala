@@ -2,7 +2,7 @@ package spinal.lib.memory.sdram.xdr.phy
 
 import spinal.core._
 import spinal.lib._
-import spinal.lib.blackbox.xilinx.ultrascale.{IDELAYCTRL, IDELAYE3, IOBUFDS, IOBUF, ISERDESE3, MMCME3_ADV, OBUFDS, ODELAYE3, OSERDESE3}
+import spinal.lib.blackbox.xilinx.ultrascale.{IDELAYCTRL, IDELAYE3, IOBUF, IOBUFDS, ISERDESE3, MMCME3_ADV, OBUFDS, ODELAYE3, OSERDESE3}
 import spinal.lib.bus.misc.BusSlaveFactory
 import spinal.lib.memory.sdram.SdramLayout
 import spinal.lib.memory.sdram.xdr.{PhyLayout, SdramXdrIo, SdramXdrPhyCtrl}
@@ -11,6 +11,8 @@ import scala.collection.Seq
 import spinal.core.sim._
 import spinal.lib.memory.sdram.SdramGeneration.DDR3
 import spinal.lib.memory.sdram._
+
+import scala.util.control.Breaks.{break, breakable}
 
 
 
@@ -37,6 +39,11 @@ case class XilinxUSPhy(sl : SdramLayout,
   val io = new Bundle {
     val ctrl = slave(SdramXdrPhyCtrl(pl))
     val sdram = master(SdramXdrIo(sl))
+    val debug = new Bundle {
+      val dqsEnableWindow = out Bits(4 bits)
+      val dqsT = out Bits(((sl.dataWidth + 7) / 8) bits)
+      val dqT = out Bits(sl.dataWidth bits)
+    }
   }
 
   assert(clkRatio == 2)
@@ -124,6 +131,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     B"01" -> B"1100"
   ).asBools.reverse)))
   dqstReg.foreach(_.init(False))
+  io.debug.dqsEnableWindow := B(dqstReg)
 
   val dqReg = io.ctrl.phases.map(p => RegNext(p.DQw))
   val dmReg = io.ctrl.phases.map(p => RegNext(p.DM))
@@ -134,6 +142,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     val buf = IOBUFDS()
     buf.T := serT
     buf.I := serQ
+    io.debug.dqsT(i) := serT
     io.sdram.DQS(i) := buf.IO
     io.sdram.DQSn(i) := buf.IOB
   }
@@ -146,6 +155,7 @@ case class XilinxUSPhy(sl : SdramLayout,
   io.ctrl.readValid := io.ctrl.readEnable
 
   // --- DQ Write Path ---
+  val dqTVec = Vec(Bool, sl.dataWidth)
   val dq = for (i <- 0 until sl.dataWidth) yield new Area {
     val buf = IOBUF()
     io.sdram.DQ(i) := buf.IO
@@ -153,10 +163,11 @@ case class XilinxUSPhy(sl : SdramLayout,
     val (serQ, serT) = seqToOutput("DQ", dqReg.map(_.map(_(i))).flatten, List.fill(4)(dqe0Reg))
     buf.T := serT
     buf.I := serQ
+    dqTVec(i) := buf.T
 
     // --- Read Path (unimplemented) ---
   }
-
+  io.debug.dqT := B(dqTVec)
 
 
   case class PLLE2_ADV() extends BlackBox {
