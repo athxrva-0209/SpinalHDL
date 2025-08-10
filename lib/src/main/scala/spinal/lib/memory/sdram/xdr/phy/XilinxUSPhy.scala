@@ -45,6 +45,9 @@ case class XilinxUSPhy(sl : SdramLayout,
       val dqT = out Bits(sl.dataWidth bits)
     }
   }
+  io.debug.dqsEnableWindow.simPublic()
+  io.debug.dqsT.simPublic()
+  io.debug.dqT.simPublic()
 
   assert(clkRatio == 2)
   val phaseCount = clkRatio
@@ -99,8 +102,8 @@ case class XilinxUSPhy(sl : SdramLayout,
         serdes.RST := clk90Rst
     }
 
-    // OSERDESE3 has a single T input, so we use a logical OR of all `outputEnable` signals.
-    serdes.T := !outputEnable.reduce(_ & _)
+    // Drive whenever any sub-bit is enabled (preamble/active/postamble)
+    serdes.T := !outputEnable.reduce(_ | _)
     (serdes.OQ, serdes.T_OUT) // Use T_OUT as the tristate output
   }
 
@@ -154,7 +157,7 @@ case class XilinxUSPhy(sl : SdramLayout,
 
   io.ctrl.readValid := io.ctrl.readEnable
 
-  // --- DQ Write Path ---
+  // --- DQ Paths ---
   val dqTVec = Vec(Bool, sl.dataWidth)
   val dq = for (i <- 0 until sl.dataWidth) yield new Area {
     val buf = IOBUF()
@@ -165,7 +168,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     buf.I := serQ
     dqTVec(i) := buf.T
 
-    // Basic read path (no training): capture with ISERDESE3 clocked by serdesClk0
+    // Basic read path (no training)
     val des = ISERDESE3(
       DATA_WIDTH = phaseCount * pl.dataRate,
       FIFO_ENABLE = "FALSE",
@@ -183,8 +186,6 @@ case class XilinxUSPhy(sl : SdramLayout,
     for (phase <- 0 until phaseCount; ratio <- 0 until pl.dataRate) {
       io.ctrl.phases(phase).DQr(ratio)(i) := des.Q((phaseCount * pl.dataRate - 1) - (phase * pl.dataRate + ratio))
     }
-
-    // --- Read Path (unimplemented) ---
   }
   io.debug.dqT := B(dqTVec)
 
@@ -423,26 +424,25 @@ object XilinxUSPhyWritePathCheck extends App {
     // Wait until we observe a preamble window 0011
     var sawPreamble = false
     var sawActive = false
-    for(_ <- 0 until 20){
-      dut.clockDomain.waitSampling()
-      val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
-      val dqsT = dut.logic.phy.io.debug.dqsT.toBigInt
-      if(dqsWin == 0x3){
-        sawPreamble = true
-        // Expect DQS to drive during preamble (T=0). Current implementation may fail here.
-        assert(dqsT == 0, s"DQS should drive (T=0) during preamble 0011, got dqsT=0x${dqsT.toString(16)}")
-      }
-      if(dqsWin == 0xF){
-        sawActive = true
-        assert(dqsT == 0, s"DQS should drive (T=0) during active 1111, got dqsT=0x${dqsT.toString(16)}")
-      }
-      if(sawPreamble && sawActive) {
-        // Also DQ should be driving while writeEnable is asserted (after one cycle latency)
-        val dqT = dut.logic.phy.io.debug.dqT.toBigInt
-        assert(dqT == 0, s"DQ should be driving (T=0) during write, got dqT=0x${dqT.toString(16)}")
-        // Keep running a couple more cycles
-        dut.clockDomain.waitSampling(2)
-        break
+    breakable {
+      for(_ <- 0 until 20){
+        dut.clockDomain.waitSampling()
+        val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
+        val dqsT = dut.logic.phy.io.debug.dqsT.toBigInt
+        if(dqsWin == 0x3){
+          sawPreamble = true
+          assert(dqsT == 0, s"DQS should drive (T=0) during preamble 0011, got dqsT=0x${dqsT.toString(16)}")
+        }
+        if(dqsWin == 0xF){
+          sawActive = true
+          assert(dqsT == 0, s"DQS should drive (T=0) during active 1111, got dqsT=0x${dqsT.toString(16)}")
+        }
+        if(sawPreamble && sawActive) {
+          val dqT = dut.logic.phy.io.debug.dqT.toBigInt
+          assert(dqT == 0, s"DQ should be driving (T=0) during write, got dqT=0x${dqT.toString(16)}")
+          dut.clockDomain.waitSampling(2)
+          break
+        }
       }
     }
     assert(sawPreamble, "Did not observe DQS preamble window 0011 after writeEnable rising")
