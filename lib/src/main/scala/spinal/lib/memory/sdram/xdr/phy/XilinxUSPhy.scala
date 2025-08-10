@@ -38,6 +38,11 @@ case class XilinxUSPhy(sl : SdramLayout,
   val io = new Bundle {
     val ctrl = slave(SdramXdrPhyCtrl(pl))
     val sdram = master(SdramXdrIo(sl))
+    val debug = new Bundle {
+      val dqsEnableWindow = out Bits(4 bits)
+      val dqsT = out Bits(((sl.dataWidth + 7) / 8) bits)
+      val dqT = out Bits(sl.dataWidth bits)
+    }
   }
 
   assert(clkRatio == 2)
@@ -125,6 +130,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     B"01" -> B"1100"
   ).asBools.reverse)))
   dqstReg.foreach(_.init(False))
+  io.debug.dqsEnableWindow := B(dqstReg)
 
   val dqReg = io.ctrl.phases.map(p => RegNext(p.DQw))
   val dmReg = io.ctrl.phases.map(p => RegNext(p.DM))
@@ -135,6 +141,7 @@ case class XilinxUSPhy(sl : SdramLayout,
     val buf = IOBUFDS()
     buf.T := serT
     buf.I := serQ
+    io.debug.dqsT(i) := serT
     io.sdram.DQS(i) := buf.IO
     io.sdram.DQSn(i) := buf.IOB
   }
@@ -147,6 +154,7 @@ case class XilinxUSPhy(sl : SdramLayout,
   io.ctrl.readValid := io.ctrl.readEnable
 
   // --- DQ Write Path ---
+  val dqTVec = Vec(Bool, sl.dataWidth)
   val dq = for (i <- 0 until sl.dataWidth) yield new Area {
     val buf = IOBUF()
     io.sdram.DQ(i) := buf.IO
@@ -154,9 +162,11 @@ case class XilinxUSPhy(sl : SdramLayout,
     val (serQ, serT) = seqToOutput("DQ", dqReg.map(_.map(_(i))).flatten, List.fill(4)(dqe0Reg))
     buf.T := serT
     buf.I := serQ
+    dqTVec(i) := buf.T
 
     // --- Read Path (unimplemented) ---
   }
+  io.debug.dqT := B(dqTVec)
 
 
 
@@ -273,5 +283,147 @@ object XilinxUSPhyTest extends App {
     dut.clockDomain.waitSampling(20)
 
     dut.clockDomain.waitSampling(100)
+  }
+}
+
+object XilinxUSPhyWritePathCheck extends App {
+  val simConfig = SimConfig.withFstWave.compile {
+    new Component {
+      val clk = in Bool()
+
+      val mmcm = new MMCME3_ADV(
+        CLKIN1_PERIOD = 10.0,
+        DIVCLK_DIVIDE = 1,
+        CLKFBOUT_MULT_F = 8.0,
+        CLKOUT0_DIVIDE_F = 8.0,
+        CLKOUT0_PHASE = 0.0,
+        CLKOUT1_DIVIDE = 4,
+        CLKOUT1_PHASE = 90.0,
+        STARTUP_WAIT = "FALSE"
+      )
+
+      mmcm.CLKIN1 := clk
+      mmcm.CLKIN2 := False
+      mmcm.CLKINSEL := True
+      mmcm.RST := False
+      mmcm.CLKFBIN := mmcm.CLKOUT0
+      mmcm.DADDR := 0
+      mmcm.DCLK := False
+      mmcm.DEN := False
+      mmcm.DI := 0
+      mmcm.DWE := False
+      mmcm.PSCLK := False
+      mmcm.PSEN := False
+      mmcm.PSINCDEC := False
+      mmcm.PWRDWN := False
+      mmcm.CDDCREQ := False
+
+      val clk_dfi_domain = ClockDomain(clock = mmcm.CLKOUT0, reset = False)
+      val clk90 = ClockDomain(clock = mmcm.CLKOUT1, reset = False)
+      val clk_serdes0_domain = ClockDomain(clock = mmcm.CLKOUT0, reset = False)
+      val clk_serdes90_domain = ClockDomain(clock = mmcm.CLKOUT1, reset = False)
+
+      val logic = new ClockingArea(clk_dfi_domain) {
+        val phy = new XilinxUSPhy(
+          sl = SdramLayout(dataWidth = 8, generation = DDR3, bankWidth = 3, columnWidth = 10, rowWidth = 14),
+          clkRatio = 2,
+          clk90 = clk90,
+          serdesClk0 = clk_serdes0_domain,
+          serdesClk90 = clk_serdes90_domain
+        )
+
+        // Deterministic data and controls
+        phy.io.ctrl.phases.foreach { p =>
+          p.CKE := True
+          p.CSn := False
+          p.RASn := True
+          p.CASn := True
+          p.WEn := True
+          p.DM.foreach(_ := B(0))
+        }
+        phy.io.ctrl.phases(0).DQw := B"8'hA5"
+        phy.io.ctrl.phases(1).DQw := B"8'h3C"
+        phy.io.ctrl.ADDR := 0
+        phy.io.ctrl.BA := 0
+        phy.io.ctrl.readEnable := False
+        phy.io.ctrl.writeEnable := False
+      }
+    }.setDefinitionName("XilinxUSPhyWritePathCheckTb")
+  }
+
+  simConfig.doSim("XilinxUSPhyWritePathCheck") { dut =>
+    def allOnes(width: Int) = (BigInt(1) << width) - 1
+
+    dut.clk #= false
+    dut.clockDomain.forkStimulus(period = 10)
+
+    // Reset
+    dut.clockDomain.assertReset()
+    dut.clockDomain.waitSampling(5)
+    dut.clockDomain.deassertReset()
+
+    // Idle window checks
+    for(_ <- 0 until 5){
+      dut.clockDomain.waitSampling()
+      val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
+      val dqT = dut.logic.phy.io.debug.dqT.toBigInt
+      assert(dqsWin == 0, s"Expected DQS window 0000 in idle, got ${dqsWin.toString(2)}")
+      assert(dqT == allOnes(8), s"DQ should be tri-stated in idle, got dqT=0x${dqT.toString(16)}")
+    }
+
+    // Rising writeEnable to trigger preamble
+    dut.logic.phy.io.ctrl.writeEnable #= true
+
+    // Wait until we observe a preamble window 0011
+    var sawPreamble = false
+    var sawActive = false
+    for(_ <- 0 until 20){
+      dut.clockDomain.waitSampling()
+      val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
+      val dqsT = dut.logic.phy.io.debug.dqsT.toBigInt
+      if(dqsWin == 0x3){
+        sawPreamble = true
+        // Expect DQS to drive during preamble (T=0). Current implementation may fail here.
+        assert(dqsT == 0, s"DQS should drive (T=0) during preamble 0011, got dqsT=0x${dqsT.toString(16)}")
+      }
+      if(dqsWin == 0xF){
+        sawActive = true
+        assert(dqsT == 0, s"DQS should drive (T=0) during active 1111, got dqsT=0x${dqsT.toString(16)}")
+      }
+      if(sawPreamble && sawActive) {
+        // Also DQ should be driving while writeEnable is asserted (after one cycle latency)
+        val dqT = dut.logic.phy.io.debug.dqT.toBigInt
+        assert(dqT == 0, s"DQ should be driving (T=0) during write, got dqT=0x${dqT.toString(16)}")
+        // Keep running a couple more cycles
+        dut.clockDomain.waitSampling(2)
+        break
+      }
+    }
+    assert(sawPreamble, "Did not observe DQS preamble window 0011 after writeEnable rising")
+    assert(sawActive, "Did not observe DQS active window 1111 after writeEnable rising")
+
+    // Falling writeEnable to trigger postamble
+    dut.logic.phy.io.ctrl.writeEnable #= false
+
+    var sawPost = false
+    for(_ <- 0 until 20){
+      dut.clockDomain.waitSampling()
+      val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
+      val dqsT = dut.logic.phy.io.debug.dqsT.toBigInt
+      if(dqsWin == 0xC){
+        sawPost = true
+        assert(dqsT == 0, s"DQS should drive (T=0) during postamble 1100, got dqsT=0x${dqsT.toString(16)}")
+      }
+    }
+    assert(sawPost, "Did not observe DQS postamble window 1100 after writeEnable falling")
+
+    // Back to idle
+    for(_ <- 0 until 5){
+      dut.clockDomain.waitSampling()
+      val dqsWin = dut.logic.phy.io.debug.dqsEnableWindow.toBigInt
+      val dqT = dut.logic.phy.io.debug.dqT.toBigInt
+      assert(dqsWin == 0, s"Expected DQS window 0000 in idle, got ${dqsWin.toString(2)}")
+      assert(dqT == allOnes(8), s"DQ should be tri-stated in idle, got dqT=0x${dqT.toString(16)}")
+    }
   }
 }
