@@ -165,6 +165,25 @@ case class XilinxUSPhy(sl : SdramLayout,
     buf.I := serQ
     dqTVec(i) := buf.T
 
+    // Basic read path (no training): capture with ISERDESE3 clocked by serdesClk0
+    val des = ISERDESE3(
+      DATA_WIDTH = phaseCount * pl.dataRate,
+      FIFO_ENABLE = "FALSE",
+      FIFO_SYNC_MODE = "FALSE",
+      IDDR_MODE = "FALSE"
+    )
+    des.CLK := serdesClk0.readClockWire
+    des.CLK_B := !serdesClk0.readClockWire
+    des.CLKDIV := ClockDomain.current.readClockWire
+    des.RST := ClockDomain.current.isResetActive
+    des.D := buf.O
+    des.FIFO_RD_CLK := False
+    des.FIFO_RD_EN := False
+
+    for (phase <- 0 until phaseCount; ratio <- 0 until pl.dataRate) {
+      io.ctrl.phases(phase).DQr(ratio)(i) := des.Q((phaseCount * pl.dataRate - 1) - (phase * pl.dataRate + ratio))
+    }
+
     // --- Read Path (unimplemented) ---
   }
   io.debug.dqT := B(dqTVec)
