@@ -48,6 +48,8 @@ case class XilinxUSPhy(sl : SdramLayout,
   io.debug.dqsEnableWindow.simPublic()
   io.debug.dqsT.simPublic()
   io.debug.dqT.simPublic()
+  io.ctrl.writeEnable.simPublic()
+  io.ctrl.readEnable.simPublic()
 
   assert(clkRatio == 2)
   val phaseCount = clkRatio
