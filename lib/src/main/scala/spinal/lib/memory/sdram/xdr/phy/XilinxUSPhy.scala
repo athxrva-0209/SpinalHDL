@@ -296,6 +296,12 @@ object XilinxUSPhyTest extends App {
       }
 
       val sdram = logic.phy.io.sdram
+      val dummyDQ  = Analog(Bits(8 bits))
+      val dummyDQS = Analog(Bits(1 bits))
+      val dummyDQSn= Analog(Bits(1 bits))
+      dummyDQ  <> sdram.DQ
+      dummyDQS <> sdram.DQS
+      dummyDQSn<> sdram.DQSn
     }.setDefinitionName("XilinxUSPhyTestbench")
   }
 
@@ -381,6 +387,13 @@ object XilinxUSPhyWritePathCheck extends App {
         phy.io.ctrl.readEnable := False
         phy.io.ctrl.writeEnable := False
       }
+      val sdram = logic.phy.io.sdram
+      val dummyDQ  = Analog(Bits(8 bits))
+      val dummyDQS = Analog(Bits(1 bits))
+      val dummyDQSn= Analog(Bits(1 bits))
+      dummyDQ  <> sdram.DQ
+      dummyDQS <> sdram.DQS
+      dummyDQSn<> sdram.DQSn
     }.setDefinitionName("XilinxUSPhyWritePathCheckTb")
   }
 
