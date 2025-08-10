@@ -266,7 +266,13 @@ object XilinxUSPhyTest extends App {
           p.RASn := True
           p.CASn := True
           p.WEn := True
+          p.RESETn := True
+          p.ODT := False
         }
+
+        phy.io.ctrl.DQS.preamble := False
+        phy.io.ctrl.DQS.active := False
+        phy.io.ctrl.DQS.postamble := False
       }
 
       val sdram = logic.phy.io.sdram
@@ -340,8 +346,13 @@ object XilinxUSPhyWritePathCheck extends App {
           p.RASn := True
           p.CASn := True
           p.WEn := True
+          p.RESETn := True
+          p.ODT := False
           p.DM.foreach(_ := B(0))
         }
+        phy.io.ctrl.DQS.preamble := False
+        phy.io.ctrl.DQS.active := False
+        phy.io.ctrl.DQS.postamble := False
         phy.io.ctrl.phases(0).DQw := Vec(B"8'hA5", B"8'hA5")
         phy.io.ctrl.phases(1).DQw := Vec(B"8'h3C", B"8'h3C")
         phy.io.ctrl.ADDR := 0
