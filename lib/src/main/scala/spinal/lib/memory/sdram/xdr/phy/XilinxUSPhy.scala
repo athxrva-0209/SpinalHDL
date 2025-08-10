@@ -209,7 +209,8 @@ case class XilinxUSPhy(sl : SdramLayout,
 //sl = SdramLayout(dataWidth = 8, generation = DDR3, bankWidth = 3, columnWidth = 10, rowWidth = 14)
 
 object XilinxUSPhyTest extends App {
-  val simConfig = SimConfig.withFstWave.compile {
+  private val stub = s"${System.getProperty("user.dir")}/sim/ultrascale_stubs.v"
+  val simConfig = SimConfig.withFstWave.withVerilator.addRtl(stub).compile {
     new Component {
       val clk = in Bool()
 
@@ -313,7 +314,8 @@ object XilinxUSPhyTest extends App {
 }
 
 object XilinxUSPhyWritePathCheck extends App {
-  val simConfig = SimConfig.withFstWave.compile {
+  private val stub = s"${System.getProperty("user.dir")}/sim/ultrascale_stubs.v"
+  val simConfig = SimConfig.withFstWave.withVerilator.addRtl(stub).compile {
     new Component {
       val clk = in Bool()
 
