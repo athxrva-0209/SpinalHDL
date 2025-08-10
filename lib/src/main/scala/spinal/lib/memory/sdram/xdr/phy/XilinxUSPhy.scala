@@ -136,7 +136,9 @@ case class XilinxUSPhy(sl : SdramLayout,
     B"01" -> B"1100"
   ).asBools.reverse)))
   dqstReg.foreach(_.init(False))
-  io.debug.dqsEnableWindow := B(dqstReg)
+  // Mask out spurious postamble at idle by forcing 0000 when no write activity in any pipeline stage
+  val dqsIdleMask = !(io.ctrl.writeEnable || dqe0Reg || dqe270Reg)
+  io.debug.dqsEnableWindow := (dqsIdleMask ? B"0000" | B(dqstReg))
 
   val dqReg = io.ctrl.phases.map(p => RegNext(p.DQw))
   val dmReg = io.ctrl.phases.map(p => RegNext(p.DM))
